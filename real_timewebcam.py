@@ -1,29 +1,29 @@
-from deepface import DeepFace
 import cv2
 import time
 import json
+import socket
 import threading
-import websocket  # pip install websocket-client
+from deepface import DeepFace
 
-USE_MOCK_MODE = False     # Toggle this to True to test without webcam
-PLAYER_NAME = "P1"        # Change for P2 if needed
-WS_URL = "ws://localhost:8080"  # Change to your Godot WebSocket server
+# === CONFIGURATION ===
+USE_MOCK_MODE = False
+PLAYER_NAME = "P1"
+TCP_IP = "127.0.0.1"
+TCP_PORT = 9090
 
-cooldown = 3  # Seconds between sends
+cooldown = 30  # seconds between emotion detection and send
 last_sent_time = 0
 
-# Predefined emotions for mock mode
-mock_emotions = ["happy", "sad", "angry", "neutral", "surprise"]
-
-# Setup websocket connection
+# === SETUP TCP SOCKET CLIENT ===
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 try:
-    ws = websocket.create_connection(WS_URL)
-    print("[Connected] WebSocket to Godot at", WS_URL)
+    sock.connect((TCP_IP, TCP_PORT))
+    print(f"[Connected] TCP to Godot at {TCP_IP}:{TCP_PORT}")
 except Exception as e:
-    print("WebSocket Error:", e)
+    print("TCP connection error:", e)
     exit()
 
-# Send emotion data as JSON
+# === FUNCTION TO SEND EMOTION DATA ===
 def send_emotion(emotion):
     global last_sent_time
     if time.time() - last_sent_time < cooldown:
@@ -34,64 +34,65 @@ def send_emotion(emotion):
         "player": PLAYER_NAME,
         "emotion": emotion
     }
-    try:
-        ws.send(json.dumps(data))
-        print(f"[Sent] {data}")
-    except Exception as e:
-        print("[Send Error]", e)
 
-# Real mode: detect via DeepFace
+    def send_thread():
+        try:
+            msg = json.dumps(data) + "\n"
+            sock.sendall(msg.encode('utf-8'))
+            print(f"[Sent] {data}")
+        except Exception as e:
+            print("[Send Error]", e)
+
+    threading.Thread(target=send_thread, daemon=True).start()
+
+# === REAL-TIME EMOTION DETECTION ===
 def real_mode():
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Cannot open webcam")
         return
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        try:
-            result = DeepFace.analyze(frame, actions=['emotion'], enforce_detection=False)
-            emotion = result[0]['dominant_emotion']
-            cv2.putText(frame, f'Emotion: {emotion}', (50, 50),
+    last_detect_time = 0
+    detect_interval = 30  # seconds
+
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Failed to grab frame")
+                break
+
+            now = time.time()
+            if now - last_detect_time >= detect_interval:
+                try:
+                    result = DeepFace.analyze(frame, actions=['emotion'], enforce_detection=False, detector_backend='opencv')
+                    emotion = result[0]['dominant_emotion']
+                    print(f"[Detected] Emotion: {emotion}")
+                    send_emotion(emotion)
+                    last_detect_time = now
+                except Exception as e:
+                    print("Emotion detection error:", e)
+
+            cv2.putText(frame, 'Detecting every 30s', (50, 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            send_emotion(emotion)
-        except:
-            pass
 
-        cv2.imshow('Emotion Detector', frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+            cv2.imshow('Emotion Detection (30s)', frame)
 
-    cap.release()
-    cv2.destroyAllWindows()
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
 
-# Mock mode: manually simulate emotions
-def mock_mode():
-    print("[Mock Mode] Press keys: H=Happy, A=Angry, S=Sad, N=Neutral, Q=Quit")
-    while True:
-        key = input("Enter emotion (h/a/s/n/q): ").lower()
-        if key == 'q':
-            break
-        key_map = {
-            'h': 'happy',
-            'a': 'angry',
-            's': 'sad',
-            'n': 'neutral'
-        }
-        if key in key_map:
-            send_emotion(key_map[key])
-        else:
-            print("Invalid key. Try h/a/s/n.")
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        sock.close()
 
-# Entry point
+# === MAIN ===
 if __name__ == "__main__":
     try:
         if USE_MOCK_MODE:
-            mock_mode()
+            print("Mock mode not used in this version.")
         else:
             real_mode()
     except KeyboardInterrupt:
         print("Exiting...")
-    ws.close()
+        sock.close()
