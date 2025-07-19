@@ -3,11 +3,21 @@
 
 Copy the `emotion_detector` folder to your system.
 
-### 🔹 Step 2: Install Dependencies
+### 🔹 Step 1: Install Dependencies
 
+- Download Python 3.7 to 3.10 from [python.org](https://www.python.org/downloads/)
+- During installation:
+  - ✅ Check **"Add Python to PATH"**
+  - Then click **Install Now**
+ Step 2: Create & Activate Virtual Environment
+Windows:
+python -m venv venv
+venv\Scripts\activate
+
+macOS/Linux:
+python3 -m venv venv
+source venv/bin/activate
 Open a terminal in the folder and run:
-
-```bash
 pip install -r requirements.txt
 This installs:
 
